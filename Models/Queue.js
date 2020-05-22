@@ -14,6 +14,9 @@ import promiseReflect from 'promise-reflect';
 
 export class Queue {
 
+  static status = "inactive";
+  static instance = null
+
   /**
    *
    * Set initial class properties.
@@ -24,6 +27,23 @@ export class Queue {
     this.realm = null;
     this.worker = new Worker();
     this.status = 'inactive';
+  }
+
+
+  /**
+   *
+   * Singleton patern
+   *
+   * @constructor
+   */
+  static getInstance(){
+    if(this.instance === null){
+      this.instance = new Queue();
+      return this.instance;
+    }else{
+      return this.instance;
+    }
+
   }
 
   /**
@@ -154,38 +174,20 @@ export class Queue {
     let lifespanRemaining = null;
     let concurrentJobs = [];
 
-    if (lifespan !== 0) {
-      lifespanRemaining = lifespan - (Date.now() - startTime);
-      lifespanRemaining = (lifespanRemaining === 0) ? -1 : lifespanRemaining; // Handle exactly zero lifespan remaining edge case.
-      concurrentJobs = await this.getConcurrentJobs(lifespanRemaining);
-    } else {
-      concurrentJobs = await this.getConcurrentJobs();
-    }
+    concurrentJobs = await this.getConcurrentJobs();
 
     while (this.status == 'active' && concurrentJobs.length) {
-
       // Loop over jobs and process them concurrently.
       const processingJobs = concurrentJobs.map( job => {
         return this.processJob(job);
       });
-
       // Promise Reflect ensures all processingJobs resolve so
       // we don't break await early if one of the jobs fails.
       await Promise.all(processingJobs.map(promiseReflect));
-
       // Get next batch of jobs.
-      if (lifespan !== 0) {
-        lifespanRemaining = lifespan - (Date.now() - startTime);
-        lifespanRemaining = (lifespanRemaining === 0) ? -1 : lifespanRemaining; // Handle exactly zero lifespan remaining edge case.
-        concurrentJobs = await this.getConcurrentJobs(lifespanRemaining);
-      } else {
-        concurrentJobs = await this.getConcurrentJobs();
-      }
-
+      concurrentJobs = await this.getConcurrentJobs();
     }
-
     this.status = 'inactive';
-
   }
 
   /**
@@ -249,55 +251,14 @@ export class Queue {
       // Get next job from queue.
       let nextJob = null;
 
-      // Build query string
-      // If queueLife
-      const timeoutUpperBound = (queueLifespanRemaining - 500 > 0) ? queueLifespanRemaining - 499 : 0; // Only get jobs with timeout at least 500ms < queueLifespanRemaining.
-
-      const initialQuery = (queueLifespanRemaining)
-        ? 'active == FALSE AND failed == null AND timeout > 0 AND timeout < ' + timeoutUpperBound
-        : 'active == FALSE AND failed == null';
 
       let jobs = this.realm.objects('Job')
-        .filtered(initialQuery)
-        .sorted([['priority', true], ['created', false]]);
+        .sorted([['failed', false], ['priority', true], ['created', false]]);
 
       if (jobs.length) {
         nextJob = jobs[0];
-      }
-
-      // If next job exists, get concurrent related jobs appropriately.
-      if (nextJob) {
-
-        const concurrency = this.worker.getConcurrency(nextJob.name);
-
-        const allRelatedJobsQuery = (queueLifespanRemaining)
-          ? 'name == "'+ nextJob.name +'" AND active == FALSE AND failed == null AND timeout > 0 AND timeout < ' + timeoutUpperBound
-          : 'name == "'+ nextJob.name +'" AND active == FALSE AND failed == null';
-
-        const allRelatedJobs = this.realm.objects('Job')
-          .filtered(allRelatedJobsQuery)
-          .sorted([['priority', true], ['created', false]]);
-
-        let jobsToMarkActive = allRelatedJobs.slice(0, concurrency);
-
-        // Grab concurrent job ids to reselect jobs as marking these jobs as active will remove
-        // them from initial selection when write transaction exits.
-        // See: https://stackoverflow.com/questions/47359368/does-realm-support-select-for-update-style-read-locking/47363356#comment81772710_47363356
-        const concurrentJobIds = jobsToMarkActive.map( job => job.id);
-
-        // Mark concurrent jobs as active
-        jobsToMarkActive = jobsToMarkActive.map( job => {
-          job.active = true;
-        });
-
-        // Reselect now-active concurrent jobs by id.
-        const reselectQuery = concurrentJobIds.map( jobId => 'id == "' + jobId + '"').join(' OR ');
-        const reselectedJobs = this.realm.objects('Job')
-          .filtered(reselectQuery)
-          .sorted([['priority', true], ['created', false]]);
-
-        concurrentJobs = reselectedJobs.slice(0, concurrency);
-
+        nextJob.active = true;
+        concurrentJobs.push(nextJob);
       }
 
     });
@@ -439,7 +400,7 @@ export class Queue {
  */
 export default async function queueFactory() {
 
-  const queue = new Queue();
+  const queue = Queue.getInstance();
   await queue.init();
 
   return queue;
