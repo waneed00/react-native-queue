@@ -26,7 +26,8 @@
   "homepage": "https://github.com/billmalarky/react-native-queue#readme",
   "dependencies": {
     "promise-reflect": "^1.1.0",
-    "react-native-uuid": "^1.4.9"
+    "react-native-uuid": "^1.4.9",
+    "realm": "3.6.0"
   },
   "devDependencies": {
     "babel-eslint": "^8.0.3",
