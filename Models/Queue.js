@@ -255,6 +255,8 @@ export class Queue {
       let jobs = this.realm.objects('Job')
         .sorted([['failed', false], ['priority', true], ['created', false]]);
 
+      
+
       if (jobs.length) {
         nextJob = jobs[0];
         nextJob.active = true;
