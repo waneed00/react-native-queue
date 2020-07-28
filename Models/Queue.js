@@ -167,6 +167,9 @@ export class Queue {
       return false;
     }
 
+    // Since there are no jobs bieng processed right now, we need to update status of all active jobs to false which may be in DB.
+    await this.resetJobs();
+
     this.status = 'active';
 
     // Get jobs to process
@@ -184,6 +187,8 @@ export class Queue {
       // Promise Reflect ensures all processingJobs resolve so
       // we don't break await early if one of the jobs fails.
       await Promise.all(processingJobs.map(promiseReflect));
+      // Since there are no jobs bieng processed right now, we need to update status of all active jobs to false which may be in DB.
+      await this.resetJobs();
       // Get next batch of jobs.
       concurrentJobs = await this.getConcurrentJobs();
     }
@@ -201,6 +206,26 @@ export class Queue {
   stop() {
     this.status = 'inactive';
   }
+
+  /**
+   *
+   * Reset the status of all jobs in queue to active = false
+   *
+   *
+   * @return {promise} - Promise resolves.
+   */
+  async resetJobs() {
+
+    this.realm.write(() => {
+      let jobs = this.realm.objects('Job')
+      // Mark concurrent jobs as active
+      jobs = jobs.map( job => {
+        job.active = false;
+      });
+    });
+    return true
+  }
+
 
   /**
    *
@@ -253,10 +278,11 @@ export class Queue {
 
 
       let jobs = this.realm.objects('Job')
+        .filtered("active == FALSE")
         .sorted([['failed', false], ['priority', true], ['created', false]]);
 
       
-
+      
       if (jobs.length) {
         nextJob = jobs[0];
         nextJob.active = true;
